@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_shortcut_description">사용자가 접근성 버튼을 누를 때 화면 선택을 실행합니다. 다른 앱 화면의 글이나 터치 정보를 읽지 않으며, 캡처에는 매번 Android의 동의가 필요합니다.</string>
+</resources>

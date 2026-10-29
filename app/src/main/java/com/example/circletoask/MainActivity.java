@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Circle to Ask: user-triggered screenshot selection and Android image sharing.
- * Requires user consent for each screen capture; no AccessibilityService or network permission.
+ * Requires user consent for every screen capture; no network or screen-reading permissions.
  */
 public final class MainActivity extends Activity {
     static final int BG = 0xff0b0d15, PANEL = 0xff202335, ACCENT = 0xff9c74ff;
@@ -39,9 +39,53 @@ public final class MainActivity extends Activity {
         v.setBackground(shape(color,c)); return v;
     }
     static void gap(LinearLayout l, int h) { l.addView(new View(l.getContext()),new LinearLayout.LayoutParams(1,dp(l.getContext(),h))); }
-    TextView status, toggle;
+    static final String PREFS = "circletoask_settings";
+    static final String ACTION_SETTINGS = "com.example.circletoask.OPEN_SETTINGS";
+    static final String ACTION_CAPTURE = "com.example.circletoask.OPEN_CAPTURE";
+    static final String KEY_QUICK_START = "double_press_quick_start";
+    TextView status, toggle, quickToggle;
+
+    static void createLauncherShortcuts(Context c) {
+        if (Build.VERSION.SDK_INT < 25) return;
+        try {
+            android.content.pm.ShortcutManager sm=c.getSystemService(android.content.pm.ShortcutManager.class);
+            if (sm==null || !sm.isRequestPinShortcutSupported() && sm.getMaxShortcutCountPerActivity()==0) return;
+            Intent capture=new Intent(c,MainActivity.class).setAction(ACTION_CAPTURE);
+            Intent settings=new Intent(c,MainActivity.class).setAction(ACTION_SETTINGS);
+            android.content.pm.ShortcutInfo quick=new android.content.pm.ShortcutInfo.Builder(c,"quick-capture")
+                .setShortLabel("바로 검색").setLongLabel("화면 선택 바로 시작")
+                .setIcon(android.graphics.drawable.Icon.createWithResource(c,android.R.drawable.ic_menu_search))
+                .setIntent(capture).build();
+            android.content.pm.ShortcutInfo options=new android.content.pm.ShortcutInfo.Builder(c,"open-options")
+                .setShortLabel("앱 설정").setLongLabel("Circle to Ask 설정")
+                .setIcon(android.graphics.drawable.Icon.createWithResource(c,android.R.drawable.ic_menu_preferences))
+                .setIntent(settings).build();
+            sm.setDynamicShortcuts(java.util.Arrays.asList(quick,options));
+        } catch (Exception ignored) { /* OEM launcher shortcuts are optional */ }
+    }
+    boolean shouldQuickStart(Intent i) {
+        if (i==null) return false;
+        if (ACTION_CAPTURE.equals(i.getAction())) return true;
+        if (ACTION_SETTINGS.equals(i.getAction())) return false;
+        return Intent.ACTION_MAIN.equals(i.getAction()) &&
+                getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean(KEY_QUICK_START,false);
+    }
+    void openCapture() {
+        try {
+            Intent i=new Intent(this,Capture.class);
+            startActivity(i);
+        } catch (Exception e) {
+            Toast.makeText(this,"화면 선택을 시작하지 못했습니다.",Toast.LENGTH_LONG).show();
+        }
+    }
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        createLauncherShortcuts(this);
+        if (shouldQuickStart(getIntent())) {
+            openCapture();
+            finish();
+            return;
+        }
         LinearLayout root = new LinearLayout(this);
         root.setPadding(dp(this,24),dp(this,40),dp(this,24),dp(this,24));
         root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(BG);
@@ -68,15 +112,90 @@ public final class MainActivity extends Activity {
             new Handler(getMainLooper()).postDelayed(this::refresh,350);
         });
         gap(root,18);
-        root.addView(label(this,"Google의 시스템 서클 투 서치가 아닌 독립형 도우미 앱입니다. 화면 캡처마다 Android 동의를 받으며, 이미지는 보내기 전까지 외부로 전송하지 않습니다.",13,MUTED));
+        TextView heading=label(this,"빠른 실행 및 측면 버튼",20,WHITE);
+        root.addView(heading); gap(root,10);
+        quickToggle=button(this,"",ACCENT);root.addView(quickToggle);
+        quickToggle.setOnClickListener(v->{
+            boolean current=getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean(KEY_QUICK_START,false);
+            getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean(KEY_QUICK_START,!current).apply();
+            refresh();
+        });
+        gap(root,10);
+        TextView guide=label(this,
+          "갤럭시 설정 → 유용한 기능 → 측면 버튼 → 두 번 누르기 → 앱 열기 → Circle to Ask를 선택하세요.\n\n" +
+          "위 빠른 실행이 켜져 있으면 측면 버튼 두 번 누르기 또는 홈 화면 앱 아이콘에서 화면 선택 동의 창을 바로 엽니다. 앱 아이콘을 길게 눌러 '앱 설정'을 선택하면 이 화면으로 돌아올 수 있습니다.",
+          14,MUTED);
+        guide.setPadding(dp(this,14),dp(this,15),dp(this,14),dp(this,15));
+        guide.setBackground(shape(PANEL,this));root.addView(guide);gap(root,10);
+        TextView searchNow=button(this,"지금 화면 선택 시작",ACCENT);root.addView(searchNow);
+        searchNow.setOnClickListener(v->openCapture());
+        gap(root,22);
+        root.addView(label(this,"접근성 버튼 바로가기 (선택)",20,WHITE));gap(root,10);
+        root.addView(label(this,"설정 → 접근성 → 설치된 앱에서 Circle to Ask 바로가기를 켜고 접근성 버튼에 할당할 수 있습니다. 이 기능은 화면 내용이나 입력 정보를 읽지 않습니다.",14,MUTED));
+        gap(root,10);
+        TextView accessibility=button(this,"접근성 설정 열기",PANEL);root.addView(accessibility);
+        accessibility.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        gap(root,18);
+        root.addView(label(this,"동작 중 화면은 Android 캡처 동의 후 한 장만 가져옵니다. 잠금 화면·보호된 앱은 캡처할 수 없습니다. Google의 시스템 서클 투 서치가 아닌 독립형 도우미 앱입니다.",13,MUTED));
     }
     void refresh() {
         if (status==null) return;
         status.setText((Settings.canDrawOverlays(this)?"● 화면 위 표시 허용됨":"○ 화면 위 표시 권한 필요")+
            (Bubble.running?"   ·   플로팅 버튼 켜짐":"   ·   버튼 꺼짐"));
         toggle.setText(Bubble.running?"플로팅 버튼 끄기":"플로팅 버튼 켜기");
+        if (quickToggle!=null) {
+            boolean enabled=getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean(KEY_QUICK_START,false);
+            quickToggle.setText(enabled?"측면 버튼/앱 아이콘 바로 실행: 켜짐":"측면 버튼/앱 아이콘 바로 실행: 꺼짐");
+        }
+    }
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (shouldQuickStart(intent)) openCapture();
     }
     @Override protected void onResume() { super.onResume(); refresh(); }
+
+    /**
+     * Optional Android Accessibility Button integration. It cannot intercept
+     * the Samsung side key or observe any windows: that shortcut is assigned
+     * by the OEM Side Button settings instead.
+     */
+    public static final class AccessShortcut extends android.accessibilityservice.AccessibilityService {
+        android.accessibilityservice.AccessibilityButtonController.AccessibilityButtonCallback callback;
+        @Override public void onAccessibilityEvent(android.view.accessibility.AccessibilityEvent event) { }
+        @Override public void onInterrupt() { }
+        void trigger() {
+            try {
+                Intent i=new Intent(this,Capture.class);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                startActivity(i);
+            } catch (Exception e) {
+                Toast.makeText(this,"화면 선택을 시작하지 못했습니다.",Toast.LENGTH_LONG).show();
+            }
+        }
+        @Override protected void onServiceConnected() {
+            super.onServiceConnected();
+            try {
+                android.accessibilityservice.AccessibilityServiceInfo info=getServiceInfo();
+                if(info!=null){
+                    info.flags |= android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_ACCESSIBILITY_BUTTON;
+                    setServiceInfo(info);
+                }
+                callback=new android.accessibilityservice.AccessibilityButtonController.AccessibilityButtonCallback() {
+                    @Override public void onClicked(android.accessibilityservice.AccessibilityButtonController controller) {
+                        trigger();
+                    }
+                };
+                getAccessibilityButtonController().registerAccessibilityButtonCallback(callback,new Handler(getMainLooper()));
+            } catch(Exception ignored) { }
+        }
+        @Override public void onDestroy() {
+            if(callback!=null)try {
+                getAccessibilityButtonController().unregisterAccessibilityButtonCallback(callback);
+            } catch(Exception ignored) { }
+            super.onDestroy();
+        }
+    }
 
     public static final class Bubble extends Service {
         static volatile boolean running=false;
