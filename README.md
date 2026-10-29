@@ -1,32 +1,29 @@
-# Circle to Ask / CircleToGPT (v0.2)
+# Circle to Ask (v0.3)
 
-Android (Galaxy Tab / S Pen) companion app: floating overlay button, Samsung Side button double press via system settings, optional accessibility button, and user-approved screenshot selection.
+Circle to Ask is an experimental Android/S Pen screenshot-selection companion app. Its shortcuts include a Quick Settings (notification shade) tile, a Samsung Side Button double-press app launch, an optional accessibility button, and the floating bubble.
 
-## APK build
+## Quick Settings tile
 
-GitHub Actions `Build CircleToGPT APK` builds `app/build/outputs/apk/debug/app-debug.apk` and stores it under `CircleToGPT-debug-apk` as a zipped artifact.
+- Open Circle to Ask and allow **Display over other apps**.
+- Open **Quick Settings** by swiping down twice, then tap **Edit** (pencil / plus / edit buttons). Drag **Circle to Ask** into active tiles.
+- On Android 13+, you can instead tap **빠른 설정 버튼 추가하기** in the app and accept the system add-tile prompt.
+- Tap the Circle to Ask tile from any ordinary app. It launches **only the translucent Android capture-permission host**, not the app's settings screen. After you approve the Android screen capture, a full-screen **overlay selection surface** appears above the original app, where you can circle the area with the S Pen and share it to ChatGPT.
+- The system must still ask for screen-capture consent for each session. This permission cannot be silently bypassed. Tile use while locked prompts unlock.
 
-## Samsung Side button double-press (no Accessibility permission required)
+## Side key
 
-1. Open Circle to Ask and enable **측면 버튼/앱 아이콘 바로 실행**.
-2. Open Samsung **Settings → Advanced features (유용한 기능) → Side button/Side key (측면 버튼) → Double press (두 번 누르기) → Open app (앱 열기)**.
-3. Select **Circle to Ask**.
-4. Now, pressing the side button twice starts the Android screenshot permission prompt immediately. Approve capture, circle any region with S Pen, and send to ChatGPT.
+Open the app, enable quick start, then assign the app through Samsung Settings → Advanced features → Side button → Double press → Open app → Circle to Ask. Menu labels may vary. The quick-launch activity uses a transparent launch theme to reduce app transitions.
 
-The system controls the side button, **not** our Accessibility Service. There is no power-button interception or bypass of OS protections. Samsung menu and options vary by model and One UI version. If Side button remapping is not offered, use the accessibility button or floating button instead.
+## Accessibility shortcut
 
-## Optional Accessibility shortcut
+Settings → Accessibility → Installed apps → Circle to Ask shortcut. This optional accessibility service does not retrieve window contents or monitor interaction events. 
 
-Settings → Accessibility → Installed apps → Circle to Ask 바로가기 → enable and configure the accessibility button shortcut. The service has `canRetrieveWindowContent=false`, does not process window events, does not log keys or inspect the screen, and launches the same opt-in screenshot consent flow only when invoked. It is optional and never required for Side button shortcuts.
+## Developer / APK
 
-## Opening app settings
+GitHub Actions compiles the Android Java project via Gradle; download `CircleToGPT-debug-apk` from the successful run's artifacts and extract the APK. Android app version v0.3 / versionCode 3.
 
-Long-press the Circle to Ask home-screen icon → App settings shortcut, or turn off quick start before leaving the app. Home-screen app icon launches straight into capture while quick start is enabled.
+## Privacy and limitations
 
-## Floating button
+Screenshot content is shared only when the user taps "ChatGPT에 보내기". Local screenshot cache is transient. No network permission is requested. Android's protected/secure content cannot be captured. Android overlays and background launching behavior may differ across One UI versions; the real Galaxy Tab experience has not yet been verified. This isn't an official Google Circle to Search integration. Text in Android's image-sharing intent may not automatically populate the ChatGPT composer.
 
-Permit "Display over other apps" → enable floating button → tap it from another app → approve capture → circle content → send to ChatGPT.
-
-**Privacy & limitations:** Screen capture always requires Android user consent on modern Android. Secure/protected windows cannot be captured. The captured image is stored temporarily in app cache and only shared when you choose. App does not request internet access. ChatGPT Android sharing may not prefill question text. Not an official Google Circle to Search / ChatGPT integration.
-
-**APK update note:** GitHub-hosted debug builds may use different signing keys on each workflow run. If Android reports an incompatible-signature install error, uninstall the previous debug version before installing the new one; app settings will reset. This is an experimental build and is not yet tested on a physical Galaxy Tab.
+Debug APKs built on different GitHub Actions machines may use different signing keys. Uninstall the older debug APK before installing this version if Android reports an incompatible signature.

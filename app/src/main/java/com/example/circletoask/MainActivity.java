@@ -12,6 +12,9 @@ import android.net.Uri;
 import android.os.*;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
+import android.service.quicksettings.TileService;
+import android.service.quicksettings.Tile;
+import android.app.StatusBarManager;
 import android.view.*;
 import android.widget.*;
 import java.io.*;
@@ -42,6 +45,7 @@ public final class MainActivity extends Activity {
     static final String PREFS = "circletoask_settings";
     static final String ACTION_SETTINGS = "com.example.circletoask.OPEN_SETTINGS";
     static final String ACTION_CAPTURE = "com.example.circletoask.OPEN_CAPTURE";
+    static final String ACTION_TILE = "com.example.circletoask.FROM_QUICK_SETTINGS";
     static final String KEY_QUICK_START = "double_press_quick_start";
     TextView status, toggle, quickToggle;
 
@@ -72,8 +76,13 @@ public final class MainActivity extends Activity {
     }
     void openCapture() {
         try {
-            Intent i=new Intent(this,Capture.class);
+            if(!Settings.canDrawOverlays(this)){
+                Toast.makeText(this,"원래 화면 위에서 영역을 선택하려면 '다른 앱 위에 표시'를 먼저 허용하세요.",Toast.LENGTH_LONG).show();
+                return;
+            }
+            Intent i=new Intent(this,Capture.class).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
             startActivity(i);
+            overridePendingTransition(0,0);
         } catch (Exception e) {
             Toast.makeText(this,"화면 선택을 시작하지 못했습니다.",Toast.LENGTH_LONG).show();
         }
@@ -135,6 +144,12 @@ public final class MainActivity extends Activity {
         gap(root,10);
         TextView accessibility=button(this,"접근성 설정 열기",PANEL);root.addView(accessibility);
         accessibility.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        gap(root,20);
+        root.addView(label(this,"빠른 설정 버튼",20,WHITE));gap(root,10);
+        root.addView(label(this,"알림창을 두 번 내려 Wi-Fi처럼 'Circle to Ask' 버튼을 추가하세요. 버튼을 누르면 메인 화면을 건너뛰고 캡처 허용창으로 이동합니다. 선택 화면은 기존 앱 위에 나타납니다.",14,MUTED));gap(root,10);
+        TextView addTile=button(this,"빠른 설정 버튼 추가하기",ACCENT);root.addView(addTile);
+        addTile.setOnClickListener(v->addQuickTile());gap(root,9);
+        root.addView(label(this,"버튼 추가창이 표시되지 않으면 빠른 설정 패널 → 편집(연필 또는 +) → Circle to Ask를 찾아 추가하세요.",13,MUTED));
         gap(root,18);
         root.addView(label(this,"동작 중 화면은 Android 캡처 동의 후 한 장만 가져옵니다. 잠금 화면·보호된 앱은 캡처할 수 없습니다. Google의 시스템 서클 투 서치가 아닌 독립형 도우미 앱입니다.",13,MUTED));
     }
@@ -146,6 +161,30 @@ public final class MainActivity extends Activity {
         if (quickToggle!=null) {
             boolean enabled=getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean(KEY_QUICK_START,false);
             quickToggle.setText(enabled?"측면 버튼/앱 아이콘 바로 실행: 켜짐":"측면 버튼/앱 아이콘 바로 실행: 꺼짐");
+        }
+    }
+    void addQuickTile() {
+        if(Build.VERSION.SDK_INT<33){
+            Toast.makeText(this,"빠른 설정을 내려 편집 버튼에서 Circle to Ask 타일을 직접 추가하세요.",Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            StatusBarManager manager=getSystemService(StatusBarManager.class);
+            if(manager==null)throw new IllegalStateException();
+            manager.requestAddTileService(
+                new ComponentName(this,QuickTile.class),
+                "Circle to Ask",
+                android.graphics.drawable.Icon.createWithResource(this,R.drawable.ic_circle_tile),
+                getMainExecutor(),
+                status -> {
+                    String msg;
+                    if(status==StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED) msg="빠른 설정 타일이 추가되었습니다.";
+                    else if(status==StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED) msg="빠른 설정에 이미 등록되어 있습니다.";
+                    else msg="빠른 설정 편집 메뉴에서 Circle to Ask 버튼을 추가할 수 있습니다.";
+                    Toast.makeText(this,msg,Toast.LENGTH_LONG).show();
+                });
+        } catch(Exception e) {
+            Toast.makeText(this,"빠른 설정 패널의 편집 메뉴에서 버튼을 직접 추가하세요.",Toast.LENGTH_LONG).show();
         }
     }
     @Override protected void onNewIntent(Intent intent) {
@@ -160,6 +199,49 @@ public final class MainActivity extends Activity {
      * the Samsung side key or observe any windows: that shortcut is assigned
      * by the OEM Side Button settings instead.
      */
+    /**
+     * Android system Quick Settings integration. A tile click bypasses our
+     * launcher/settings activity and opens only the translucent consent host.
+     */
+    public static final class QuickTile extends TileService {
+        @Override public void onStartListening() {
+            super.onStartListening();
+            Tile t=getQsTile();
+            if(t!=null) {
+                t.setLabel("Circle to Ask");
+                t.setState(Tile.STATE_INACTIVE);
+                t.setIcon(android.graphics.drawable.Icon.createWithResource(this,R.drawable.ic_circle_tile));
+                t.updateTile();
+            }
+        }
+        @Override public void onClick() {
+            super.onClick();
+            if(isLocked()){
+                unlockAndRun(this::launch);
+                return;
+            }
+            launch();
+        }
+        void launch() {
+            boolean ok=Settings.canDrawOverlays(this);
+            Intent intent=new Intent(this,ok?Capture.class:MainActivity.class);
+            if(!ok) intent.setAction(ACTION_SETTINGS);
+            else intent.setAction(ACTION_TILE);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_NO_ANIMATION);
+            try {
+                if(Build.VERSION.SDK_INT>=34){
+                    PendingIntent pi=PendingIntent.getActivity(this,130,intent,
+                       PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+                    startActivityAndCollapse(pi);
+                } else {
+                    startActivityAndCollapse(intent);
+                }
+            } catch(Exception e) {
+                Toast.makeText(this,"빠른 설정 실행 실패: 앱과 표시 권한을 확인하세요.",Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
     public static final class AccessShortcut extends android.accessibilityservice.AccessibilityService {
         android.accessibilityservice.AccessibilityButtonController.AccessibilityButtonCallback callback;
         @Override public void onAccessibilityEvent(android.view.accessibility.AccessibilityEvent event) { }
@@ -253,6 +335,7 @@ public final class MainActivity extends Activity {
         @Override public int onStartCommand(Intent i,int flags,int id) {
             if(i!=null && "STOP".equals(i.getAction())){stopSelf();return START_NOT_STICKY;}
             if(bubble!=null && i!=null && "SHOW".equals(i.getAction())) bubble.setVisibility(View.VISIBLE);
+            if(bubble!=null && i!=null && "HIDE".equals(i.getAction())) bubble.setVisibility(View.GONE);
             return START_STICKY;
         }
         @Override public void onDestroy(){
@@ -270,12 +353,25 @@ public final class MainActivity extends Activity {
         boolean selected=false;
         @Override public void onCreate(Bundle b) {
             super.onCreate(b);
+            if(!Settings.canDrawOverlays(this)){
+                Toast.makeText(this,"Circle to Ask 앱에서 '다른 앱 위에 표시' 권한을 허용하세요.",Toast.LENGTH_LONG).show();
+                startActivity(new Intent(this,MainActivity.class).setAction(ACTION_SETTINGS));
+                finish();
+                return;
+            }
+            if(Bubble.running)startService(new Intent(this,Bubble.class).setAction("HIDE"));
             receiver=new BroadcastReceiver(){
                 @Override public void onReceive(Context c,Intent i){
                     String path=i.getStringExtra(PATH);
                     if(path!=null){
                         selected=true;
-                        startActivity(new Intent(Capture.this,Select.class).putExtra(PATH,path));
+                        try {
+                            Intent overlay=new Intent(Capture.this,SelectionOverlay.class);
+                            overlay.putExtra(PATH,path);
+                            startForegroundService(overlay);
+                        } catch(Exception ex) {
+                            startActivity(new Intent(Capture.this,Select.class).putExtra(PATH,path).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION));
+                        }
                     } else {
                         Toast.makeText(Capture.this,i.getStringExtra("error"),Toast.LENGTH_LONG).show();
                     }
@@ -445,6 +541,170 @@ public final class MainActivity extends Activity {
             c.translate(-left,-top);c.clipPath(p);c.drawBitmap(image,0,0,paint);
             return out;
         }
+    }
+
+
+    /**
+     * Interactive TYPE_APPLICATION_OVERLAY: the original app stays the underlying
+     * foreground app. Only the transient Android MediaProjection consent
+     * activity is launched; the selection UI is not a normal app activity.
+     */
+    public static final class SelectionOverlay extends Service {
+        WindowManager manager;
+        View overlayRoot;
+        Bitmap bitmap;
+        Region region;
+        EditText question;
+        boolean completed=false;
+
+        @Override public int onStartCommand(Intent i,int flags,int id){
+            NotificationManager notifications=getSystemService(NotificationManager.class);
+            notifications.createNotificationChannel(new NotificationChannel("selection","화면 선택",NotificationManager.IMPORTANCE_LOW));
+            Notification ongoing=new Notification.Builder(this,"selection")
+                .setSmallIcon(android.R.drawable.ic_menu_crop)
+                .setContentTitle("Circle to Ask")
+                .setContentText("화면의 원하는 부분을 선택하고 있습니다.")
+                .setOngoing(true).build();
+            if(Build.VERSION.SDK_INT>=34) startForeground(3,ongoing,ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            else startForeground(3,ongoing);
+
+            if(!Settings.canDrawOverlays(this)) {
+                Toast.makeText(this,"다른 앱 위에 표시 권한이 필요합니다.",Toast.LENGTH_LONG).show();
+                stopSelf();
+                return START_NOT_STICKY;
+            }
+            String path=i==null?null:i.getStringExtra(Capture.PATH);
+            bitmap=path==null?null:BitmapFactory.decodeFile(path);
+            if(bitmap==null) {
+                Toast.makeText(this,"화면 이미지를 열 수 없습니다.",Toast.LENGTH_LONG).show();
+                stopSelf();
+                return START_NOT_STICKY;
+            }
+            try {
+                buildUI();
+            } catch(Exception e) {
+                Toast.makeText(this,"화면 위에 선택 도구를 표시하지 못했습니다.",Toast.LENGTH_LONG).show();
+                stopSelf();
+            }
+            return START_NOT_STICKY;
+        }
+        void buildUI() {
+            manager=getSystemService(WindowManager.class);
+            LinearLayout root=new LinearLayout(this);
+            root.setOrientation(LinearLayout.VERTICAL);
+            root.setBackgroundColor(0xff0b0d15);
+            overlayRoot=root;
+
+            LinearLayout bar=new LinearLayout(this);
+            bar.setGravity(Gravity.CENTER_VERTICAL);
+            bar.setPadding(dp(this,15),dp(this,8),dp(this,12),dp(this,8));
+            bar.setBackgroundColor(PANEL);
+            root.addView(bar,new LinearLayout.LayoutParams(-1,dp(this,62)));
+            TextView title=label(this,"◎  화면에서 동그라미를 그리세요",16,WHITE);
+            bar.addView(title,new LinearLayout.LayoutParams(0,-2,1f));
+            TextView close=button(this,"✕",BG);
+            bar.addView(close);
+            close.setOnClickListener(v->stopSelf());
+
+            region=new Region(this,bitmap);
+            root.addView(region,new LinearLayout.LayoutParams(-1,0,1));
+            LinearLayout footer=new LinearLayout(this);
+            footer.setPadding(dp(this,12),dp(this,10),dp(this,12),dp(this,14));
+            footer.setOrientation(LinearLayout.VERTICAL);
+            footer.setBackgroundColor(PANEL);
+            root.addView(footer,new LinearLayout.LayoutParams(-1,-2));
+
+            question=new EditText(this);
+            question.setTextColor(WHITE);
+            question.setHintTextColor(MUTED);
+            question.setTextSize(15);question.setSingleLine(false);
+            question.setMaxLines(2);
+            question.setHint("질문 입력 (예: 이 문제를 설명해줘)");
+            footer.addView(question,new LinearLayout.LayoutParams(-1,-2));
+            gap(footer,6);
+
+            LinearLayout actions=new LinearLayout(this);
+            footer.addView(actions);
+            TextView reset=button(this,"다시 그리기",BG);
+            actions.addView(reset,new LinearLayout.LayoutParams(0,-2,1f));
+            reset.setOnClickListener(v->region.clear());
+            TextView send=button(this,"ChatGPT에 보내기",ACCENT);
+            LinearLayout.LayoutParams sendLp=new LinearLayout.LayoutParams(0,-2,2f);
+            sendLp.leftMargin=dp(this,10);
+            actions.addView(send,sendLp);
+            send.setOnClickListener(v->share(false));
+            gap(footer,6);
+            TextView all=label(this,"선택하지 않고 전체 화면 보내기",13,MUTED);
+            all.setGravity(Gravity.CENTER);
+            all.setPadding(0,dp(this,5),0,dp(this,5));
+            footer.addView(all);
+            all.setOnClickListener(v->share(true));
+
+            WindowManager.LayoutParams window=new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+            window.gravity=Gravity.TOP|Gravity.START;
+            window.softInputMode=WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
+            window.setTitle("Circle to Ask selection");
+            manager.addView(root,window);
+        }
+        void share(boolean all) {
+            if(completed) return;
+            if(!all && !region.selected) {
+                Toast.makeText(this,"먼저 S펜으로 영역을 선택하세요.",Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Bitmap image=null;
+            try {
+                image=region.cut(all);
+                if(image==null) return;
+                File dir=new File(getCacheDir(),"captures");
+                if(!dir.exists())dir.mkdirs();
+                File output=new File(dir,"selected_"+System.currentTimeMillis()+".png");
+                try(FileOutputStream os=new FileOutputStream(output)){
+                    if(!image.compress(Bitmap.CompressFormat.PNG,100,os))throw new IOException("PNG encoding failed");
+                }
+                Uri uri=new Uri.Builder().scheme("content")
+                    .authority(getPackageName()+".images")
+                    .appendPath(output.getName()).build();
+                String prompt=question.getText().toString().trim();
+                if(prompt.isEmpty())prompt="선택한 화면을 쉽게 설명해줘.";
+                Intent send=new Intent(Intent.ACTION_SEND);
+                send.setType("image/png");
+                send.putExtra(Intent.EXTRA_STREAM,uri);
+                send.putExtra(Intent.EXTRA_TEXT,prompt);
+                send.setClipData(ClipData.newRawUri("선택한 화면",uri));
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_ACTIVITY_NEW_TASK);
+                Intent target=new Intent(send).setPackage("com.openai.chatgpt");
+                try {
+                    grantUriPermission("com.openai.chatgpt",uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    startActivity(target);
+                } catch (android.content.ActivityNotFoundException missing) {
+                    Intent chooser=Intent.createChooser(send,"이미지 공유");
+                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(chooser);
+                }
+                completed=true;
+                stopSelf();
+            } catch(Exception e) {
+                Toast.makeText(this,"이미지 공유에 실패했습니다.",Toast.LENGTH_LONG).show();
+            } finally {
+                if(image!=null)image.recycle();
+            }
+        }
+        @Override public void onDestroy(){
+            if(manager!=null&&overlayRoot!=null)
+                try{manager.removeViewImmediate(overlayRoot);}catch(Exception ignored){}
+            if(bitmap!=null)bitmap.recycle();
+            if(Bubble.running) try {
+                startService(new Intent(this,Bubble.class).setAction("SHOW"));
+            } catch(Exception ignored){}
+            new File(getCacheDir(),"screen.png").delete();
+            super.onDestroy();
+        }
+        @Override public IBinder onBind(Intent i){return null;}
     }
 
     public static final class Select extends Activity {
